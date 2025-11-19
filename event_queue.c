@@ -39,7 +39,7 @@ static void handle_malloc(void* info) {
 static void handle_calloc(void* info) {
     size_t* data = info;
     size_t total = data[0] * data[1];
-    fprintf(file, "\"type\": \"calloc\", \"size\": %ld, \"sizePerMember\": %ld, \"members\": %ld, \"returnValue\": ", total, data[0], data[1]);
+    fprintf(file, "\"type\": \"calloc\", \"size\": %ld, \"members\": %ld, \"sizePerMember\": %ld, \"returnValue\": ", total, data[0], data[1]);
     if (data[2] == 0) fprintf(file, "null}");
     else fprintf(file, "\"%p\"}", (void*)data[2]);
 }
