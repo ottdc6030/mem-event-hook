@@ -1,9 +1,10 @@
 #include "define_override.h"
 #include "event_queue.h"
 #include <pthread.h>
+#include <sys/mman.h>
 
 
-static __thread int new_behavior;
+static __thread int new_behavior = 0;
 
 void enable_new_behavior(void) {
     new_behavior = 1;
@@ -33,11 +34,53 @@ OVERRIDE(void*, malloc, (size_t size), (size)) {
 OVERRIDE(void*, calloc, (size_t mem_count, size_t mem_size), (mem_count, mem_size)) {
     void* send = real_calloc(mem_count, mem_size);
 
-    void** data = real_malloc(3*sizeof(void*));
+    void** data = malloc(3*sizeof(void*));
     data[0] = (void*)mem_count;
     data[1] = (void*)mem_size;
     data[2] = send;
     push_event(CALLOC, data);
+
+    return send;
+}
+
+OVERRIDE(void*, realloc, (void* ptr, size_t size), (ptr, size)) {
+    void* send = real_realloc(ptr, size);
+
+    void** data = malloc(3*sizeof(void*));
+    data[0] = ptr;
+    data[1] = (void*)size;
+    data[2] = send;
+    push_event(REALLOC, data);
+
+    return send;
+}
+
+OVERRIDE(void*, mmap, (void *addr, size_t len, int prot, int flags, int fd, off_t offset), (addr, len, prot, flags, fd, offset)) {
+    void* send = real_mmap(addr, len, prot, flags, fd, offset);
+
+    mmap_data* data = malloc(sizeof(mmap_data));
+    data->addr = addr;
+    data->len = len;
+    data->prot = prot;
+    data->flags = flags;
+    data->fd = fd;
+    data->offset = offset;
+    data->retVal = send;
+
+    push_event(MMAP, data);
+
+    return send;
+}
+
+OVERRIDE(int, munmap, (void* addr, size_t size), (addr, size)) {
+    int send = real_munmap(addr, size);
+
+    void** data = malloc(3*sizeof(void));
+    data[0] = addr;
+    data[1] = (void*) size;
+    data[2] = (void*)((long)send);
+
+    push_event(MUNMAP, data);
 
     return send;
 }
@@ -99,6 +142,15 @@ V_OVERRIDE_NORETURN(exit, (int status), (status)) {
     push_event(THREAD_EXIT, (void*) stat);
     real_exit(status);
     __builtin_unreachable();
+}
+
+ON_FORK {
+    int pid = real_fork();
+    if (pid > 0) {
+        long child = pid;
+        push_event(FORK, (void*)child);
+    }
+    return pid;
 }
 
 OVERRIDE_MAIN() {

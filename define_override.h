@@ -149,6 +149,25 @@ int use_new_behavior(void);
     void new_##name args
 
 /**
+ * Forks are a special case. Children are expected to execute a separate program, meaning the library setup will start all over again.
+ * So no new behavior should not be recorded in a child when all it is doing is getting ready to execute something else.
+ */
+#define ON_FORK \
+    static int (*real_fork)(void); \
+    int new_fork(void);             \
+                                    \
+    int fork(void) {                \
+        ASSERT_REAL(fork)           \
+        disable_new_behavior();     \
+        int ret = new_fork();       \
+        if (ret > 0) enable_new_behavior(); \
+        return ret;                 \
+    }                               \
+                                    \
+    int new_fork(void)
+
+
+/**
  * Overrides the int main() function. You have access to its parameters (int argc, char** argv, char** envp)
  * Pointer to orignal function is real_main
  */
