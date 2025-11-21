@@ -1,7 +1,10 @@
+#define _GNU_SOURCE
+#include <unistd.h>
 #include "define_override.h"
 #include "event_queue.h"
 #include <pthread.h>
 #include <sys/mman.h>
+#include <string.h>
 
 
 static __thread int new_behavior = 0;
@@ -90,20 +93,47 @@ V_OVERRIDE(free, (void* arg), (arg)) {
     real_free(arg);
 }
 
+
+OVERRIDE(void*, memcpy, (void* dest, const void* src, size_t n), (dest, src, n)) {
+    void** data = malloc(3*sizeof(void*));
+    data[0] = dest;
+    data[1] = (void*)src;
+    data[2] = (void*)n;
+
+    push_event(MEMCPY, data);
+
+    return real_memcpy(dest, src, n);
+}
+
+
+
+OVERRIDE(char*, strncpy, (char* dest, const char* src, size_t n), (dest, src, n)) {
+    void** data = malloc(3*sizeof(void*));
+    data[0] = dest;
+    data[1] = (void*)src;
+    data[2] = (void*)n;
+
+    push_event(STRNCPY, data);
+
+    return real_strncpy(dest, src, n);
+}
+
+
+
 /**
  * When a new thread spawns using pthread_create(), this wrapper function is passed in instead
  * It still calls the original function, but allows for some monitoring before and after exectution.
  */
 static void* thread_wrapper(void* thread_pack) {
-    disable_new_behavior();
+    void* stackBase = __builtin_frame_address(0);
+
     void* (*func)(void*) = ((void**)thread_pack)[0];
     void* arg = ((void**)thread_pack)[1];
 
+    ((void**)thread_pack)[3] = stackBase;
+
     push_event(THREAD_CREATE, thread_pack);
     enable_new_behavior();
-
-    //Whatever pre-monitoring we want.
-    //We have the thread, the original function, and the arg passed into that function.
 
     void* send = func(arg);
     disable_new_behavior();
@@ -119,11 +149,11 @@ OVERRIDE(int, pthread_create,
     (__newthread, __attr, __start_routine, __arg)) {
 
     ASSERT_REAL(malloc);
-    void** pack = real_malloc(2*sizeof(void*));
+    void** pack = real_malloc(4*sizeof(void*));
     pack[0] = __start_routine;
     pack[1] = __arg;
-
-    //You COULD do extra things here before/after, but the wrapper is what actually runs in the new thread.
+    pack[2] = (void*)((unsigned long)gettid());
+    //Slot 3 will be filled with the stack base pointer once the thread starts.
 
     return real_pthread_create(__newthread, __attr, thread_wrapper, pack);
 }
@@ -153,7 +183,7 @@ ON_FORK {
     return pid;
 }
 
-OVERRIDE_MAIN() {
+OVERRIDE_MAIN {
     printf("ARGS:\n");
     for (int i = 0; i < argc; i++) {
         printf("%d: %s\n", i, argv[i]);
@@ -164,9 +194,11 @@ OVERRIDE_MAIN() {
         printf("%d: %s\n", i, envp[i]);
     }
 
-    void** dummy_arg = malloc(2*sizeof(void*));
-    dummy_arg[0] = NULL;
+    void** dummy_arg = malloc(4*sizeof(void*));
+    dummy_arg[0] = real_main;
     dummy_arg[1] = argv;
+    dummy_arg[2] = 0;
+    dummy_arg[3] = __builtin_frame_address(0);
     push_event(THREAD_CREATE, dummy_arg);
 
     enable_new_behavior();

@@ -12,6 +12,8 @@ enum OVERRIDE_ID {
     REALLOC,
     MMAP,
     MUNMAP,
+    STRNCPY,
+    MEMCPY,
     MAX_OVERRIDE_VAL //Not an actual override, just easy way to get size of enum.
 };
 

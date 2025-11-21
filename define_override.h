@@ -171,7 +171,7 @@ int use_new_behavior(void);
  * Overrides the int main() function. You have access to its parameters (int argc, char** argv, char** envp)
  * Pointer to orignal function is real_main
  */
-#define OVERRIDE_MAIN() \
+#define OVERRIDE_MAIN \
     typedef int (*main_fn_t)(int, char**, char**); \
     int (*real___libc_start_main)(main_fn_t, int, char**, void(*)(), void(*)(), void(*)(), void*) = NULL; \
     int new_main(int argc, char** argv, char** envp); \

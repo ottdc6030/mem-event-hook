@@ -19,6 +19,17 @@ typedef struct event {
     struct event* next;
 } event;
 
+//TODO: MAYBE implement this if a bottleneck appears, but unlikely.
+/*
+typedef struct event_queue {
+    FILE* file;
+    event* first;
+    event* last;
+    int size;
+} event_queue;
+
+static event_queue queues[MAX_OVERRIDE_VAL];
+*/
 static event* first;
 static event* last;
 static int size;
@@ -42,7 +53,6 @@ static inline void pp(void* ptr, FILE* f, int newline) {
 
 static void handle_malloc(void* info, FILE* f) {
     size_t* data = info;
-    //Size, then return value
     fprintf(f, "%lu,", data[0]);
     pp((void*)data[1], f, 1);
 }
@@ -62,7 +72,9 @@ static void handle_pthread_create(void* info, FILE* f) {
     void** data = info;
 
     pp(data[0], f, 0);
-    pp(data[1], f, 1);
+    pp(data[1], f, 0);
+    fprintf(f, "%lu,", (unsigned long)data[2]);
+    pp(data[3], f, 1);
 }
 
 static void handle_pthread_exit(void* info, FILE* f) {
@@ -124,6 +136,13 @@ static void handle_munmap(void* info, FILE* f) {
     pb(data[2] == NULL, f, 1);
 }
 
+static void handle_strncpy(void* info, FILE* f) {
+    void** data = info;
+    pp(data[0], f, 0);
+    pp(data[1], f, 0);
+    fprintf(f, "%lu\n", (size_t)data[2]);
+}
+
 void push_event(int event_type, void* data) {
     struct timespec time;
     timespec_get(&time, TIME_UTC);
@@ -175,7 +194,8 @@ int create_file(int event_type, FILE** file) {
 
 
     pid_t pid = getpid();
-    const char* event_names[] = { "malloc", "calloc", "free", "thread_create", "thread_exit", "exit", "fork", "realloc", "mmap", "munmap" };
+    const char* event_names[] = { "malloc", "calloc", "free", "thread_create", "thread_exit", "exit", "fork", "realloc", "mmap", "munmap",
+                                    "strncpy", "memcpy" };
     char path[4096];
 
     snprintf(path, sizeof(path), "%s/%d/%s.csv", log_root, pid, event_names[event_type]);
@@ -232,7 +252,7 @@ void flush_events(void) {
                     line = "address";
                     break;
                 case THREAD_CREATE:
-                    line = "function,arg";
+                    line = "function,arg,parent_thread,stack_base";
                     break;
                 case THREAD_EXIT:
                     line = "return_value";
@@ -251,6 +271,12 @@ void flush_events(void) {
                     break;
                 case MUNMAP:
                     line = "address,size,success";
+                    break;
+                case STRNCPY:
+                    line = "destination,source,max_length";
+                    break;
+                case MEMCPY:
+                    line = "destination,source,size";
                     break;
                 default:
                     fprintf(stderr, "UNHANDLED EVENT SPOTTED\n");
@@ -301,6 +327,10 @@ void flush_events(void) {
                 break;
             case MUNMAP:
                 handle_munmap(e->data, f);
+                break;
+            case STRNCPY:
+            case MEMCPY:
+                handle_strncpy(e->data, f);
                 break;
             default:
                 fprintf(stderr, "UNHANDLED EVENT SPOTTED\n");
