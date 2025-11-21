@@ -127,12 +127,14 @@ OVERRIDE(char*, strncpy, (char* dest, const char* src, size_t n), (dest, src, n)
 static void* thread_wrapper(void* thread_pack) {
     void* stackBase = __builtin_frame_address(0);
 
-    void* (*func)(void*) = ((void**)thread_pack)[0];
-    void* arg = ((void**)thread_pack)[1];
+    void** pack = thread_pack;
 
-    ((void**)thread_pack)[3] = stackBase;
+    void* (*func)(void*) = pack[0];
+    void* arg = pack[1];
 
-    push_event(THREAD_CREATE, thread_pack);
+    pack[3] = stackBase;
+
+    push_event(THREAD_CREATE, pack);
     enable_new_behavior();
 
     void* send = func(arg);
@@ -169,7 +171,7 @@ V_OVERRIDE_NORETURN(pthread_exit, (void* retval), (retval)) {
 
 V_OVERRIDE_NORETURN(exit, (int status), (status)) {
     unsigned long stat = status;
-    push_event(THREAD_EXIT, (void*) stat);
+    push_event(EXIT, (void*) stat);
     real_exit(status);
     __builtin_unreachable();
 }
