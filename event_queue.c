@@ -1,6 +1,7 @@
 
 #define _GNU_SOURCE
 #include "event_queue.h"
+#include "alloc_map.h"
 #include <stdint.h>
 #include <time.h>
 #include <pthread.h>
@@ -19,7 +20,7 @@ typedef struct event {
     struct event* next;
 } event;
 
-//TODO: MAYBE implement this if a bottleneck appears, but unlikely.
+//TODO: MAYBE implement this if a bottleneck appears and we have time, but unlikely.
 /*
 typedef struct event_queue {
     FILE* file;
@@ -48,6 +49,11 @@ static unsigned long origin = 0;
 static inline void pp(void* ptr, FILE* f, int newline) {
     if (ptr == NULL) fprintf(f, "null");
     else fprintf(f, "\"%p\"", ptr);
+    fprintf(f,newline ? "\n" : ",");
+}
+
+static inline void pb(int bool, FILE* f, int newline) {
+    fprintf(f, bool ? "True":"False");
     fprintf(f,newline ? "\n" : ",");
 }
 
@@ -86,7 +92,16 @@ static void handle_exit(void* info, FILE* f) {
 }
 
 static void handle_fork(void* info, FILE* f) {
-    fprintf(f, "%ld\n", (long)info);
+    unsigned long data = (unsigned long) info;
+
+    int is_virtual = (data & (1L << 32)) != 0L;
+
+    if (is_virtual) {
+        data = data & ~(1L << 32);
+    }
+
+    pb(is_virtual, f, 0);
+    fprintf(f, "%lu\n", data);
 }
 
 static void handle_realloc(void* info, FILE* f) {
@@ -96,10 +111,7 @@ static void handle_realloc(void* info, FILE* f) {
     pp(data[2], f, 1);
 }
 
-static inline void pb(int bool, FILE* f, int newline) {
-    fprintf(f, bool ? "True":"False");
-    fprintf(f,newline ? "\n" : ",");
-}
+
 
 static void handle_mmap(void* info, FILE* f) {
     mmap_data* data = info;
@@ -143,9 +155,14 @@ static void handle_strncpy(void* info, FILE* f) {
     fprintf(f, "%lu\n", (size_t)data[2]);
 }
 
-void push_event(int event_type, void* data) {
-    struct timespec time;
-    timespec_get(&time, TIME_UTC);
+static void handle_clone3(void* info, FILE* f) {
+    unsigned long* data = info;
+    for (int i = 0; i < 12; i++) fprintf(f, "%lu,", data[i]);
+    fprintf(f, "%lu\n", data[12]);
+}
+
+void push_event(int event_type, void* data, struct timespec* time) {
+    timespec_get(time, TIME_UTC);
 
     event* e = malloc(sizeof(event));
     if (e == NULL) {
@@ -157,12 +174,12 @@ void push_event(int event_type, void* data) {
     e->data = data;
     e->next = NULL;
     e->thread_id = gettid();
-    e->time = time;
+    e->time = *time;
 
     pthread_mutex_lock(&lock);
 
     if (origin == 0) {
-        origin = (time.tv_sec * 1000000000L) + time.tv_nsec;
+        origin = (time->tv_sec * 1000000000UL) + time->tv_nsec;
         char print[100];
         sprintf(print, "%lu", origin);
         setenv("LD_ORIGIN_TIME", print,1);
@@ -195,7 +212,7 @@ int create_file(int event_type, FILE** file) {
 
     pid_t pid = getpid();
     const char* event_names[] = { "malloc", "calloc", "free", "thread_create", "thread_exit", "exit", "fork", "realloc", "mmap", "munmap",
-                                    "strncpy", "memcpy" };
+                                    "strncpy", "memcpy", "clone3" };
     char path[4096];
 
     snprintf(path, sizeof(path), "%s/%d/%s.csv", log_root, pid, event_names[event_type]);
@@ -261,7 +278,7 @@ void flush_events(void) {
                     line = "code";
                     break;
                 case FORK:
-                    line = "return_value";
+                    line = "virtual,return_value";
                     break;
                 case REALLOC:
                     line = "original_pointer,new_size,return_value";
@@ -278,6 +295,9 @@ void flush_events(void) {
                 case MEMCPY:
                     line = "destination,source,size";
                     break;
+                case CLONE3:
+                    line = "flags,pidfd,child_tid,parent_tid,exit_signal,stack,stack_size,tls,set_tid,set_tid_size,cgroup";
+                    break;
                 default:
                     fprintf(stderr, "UNHANDLED EVENT SPOTTED\n");
                     exit(1);
@@ -287,7 +307,7 @@ void flush_events(void) {
         }
 
         // Convert to REALTIVE nanoseconds since epoch for reasonable JSON numbers
-        unsigned long time_ms = ((e->time.tv_sec * 1000000000L) + e->time.tv_nsec) - origin;
+        unsigned long time_ms = ((e->time.tv_sec * 1000000000UL) + e->time.tv_nsec) - origin;
 
         //All file lines start with a thread id and timestamp
         fprintf(f, "%d,%ld,", e->thread_id, time_ms);
@@ -332,6 +352,9 @@ void flush_events(void) {
             case MEMCPY:
                 handle_strncpy(e->data, f);
                 break;
+            case CLONE3:
+                handle_clone3(e->data, f);
+                break;
             default:
                 fprintf(stderr, "UNHANDLED EVENT SPOTTED\n");
                 exit(1);
@@ -347,9 +370,14 @@ void flush_events(void) {
     }
 }
 
+static void analytics_loop(void) {
+
+} 
+
 static void* thread_loop(void* arg) {
     while (keep_looping) {
         flush_events();
+        analytics_loop();
     }
     return NULL;
 }
@@ -387,6 +415,8 @@ void init(void) {
     pthread_cond_init(&cond, NULL);
     first = NULL;
     last = NULL;
+
+    alloc_map_init();
     
     restart_loop();
 
@@ -405,4 +435,6 @@ void fini(void) {
     for (int i = 0; i < MAX_OVERRIDE_VAL; i++) {
         if (files[i]) fclose(files[i]);
     }
+
+    alloc_map_destroy();
 }

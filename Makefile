@@ -6,15 +6,20 @@
 
 
 CC = gcc
-CFLAGS = -fPIC -Wall -g
-LDFLAGS = -shared -ldl -pthread
+CXX = g++
+CFLAGS = -fPIC -Wall
+CXXFLAGS = -fPIC -Wall -std=c++11
+LDFLAGS = -shared -ldl -pthread -lstdc++
 
 # Output library
 LIBNAME = liboverride.so
 
 # Source files
-SOURCES = define_override.c event_queue.c
-OBJECTS = $(SOURCES:.c=.o)
+C_SOURCES = define_override.c event_queue.c
+CPP_SOURCES = alloc_map.cpp
+C_OBJECTS = $(C_SOURCES:.c=.o)
+CPP_OBJECTS = $(CPP_SOURCES:.cpp=.o)
+OBJECTS = $(C_OBJECTS) $(CPP_OBJECTS)
 
 # Test program
 TEST_PROG = test
@@ -30,10 +35,13 @@ LD_PRELOAD_LOG=logs/
 all: $(LIBNAME)
 
 $(LIBNAME): $(OBJECTS)
-	$(CC) $(LDFLAGS) -o $@ $^
+	$(CXX) $(LDFLAGS) -o $@ $^
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c -o $@ $<
 
 $(TEST_PROG): $(TEST_SRC)
 	$(CC) -o $@ $<

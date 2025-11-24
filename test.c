@@ -16,9 +16,9 @@ int main(void) {
     if (oof) printf("SUCCESS!\n");
     else printf("FAILURE!\n");
 
-    int pid = fork();
-
     char* args[] = {"./hi", NULL};
+
+    int pid = vfork();
     if (pid == 0) execv("./hi", args);
 
     pthread_t thread, thread2;

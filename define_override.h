@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <stdarg.h>
 
 void enable_new_behavior(void);
 
@@ -166,6 +167,22 @@ int use_new_behavior(void);
                                     \
     int new_fork(void)
 
+/**
+ * Special handle for vfork()
+ */
+#define ON_VFORK \
+    static int (*real_vfork)(void); \
+    int new_vfork(void);            \
+                                    \
+    int vfork(void) {               \
+        ASSERT_REAL(vfork)          \
+        disable_new_behavior();     \
+        int ret = new_vfork();      \
+        if (ret > 0) enable_new_behavior(); \
+        return ret;                 \
+    }                               \
+                                    \
+    int new_vfork(void)
 
 /**
  * Overrides the int main() function. You have access to its parameters (int argc, char** argv, char** envp)
@@ -192,5 +209,19 @@ int use_new_behavior(void);
     return real___libc_start_main(new_main, argc, argv, init, fini, rtld_fini, stack_end); \
 } \
     int new_main(int argc, char** argv, char** envp)
+
+
+#define ON_SYSCALL(number)  \
+                            \
+    long new_syscall_##number (long index, va_list ap);    \
+                                                                \
+    __attribute__((constructor))                                 \
+    void init_##number (void) {                                 \
+        syscall_monitors[number] = new_syscall_##number ;      \
+    }                                                           \
+                                                                \
+    long new_syscall_##number (long index, va_list ap)
+
+
 
 
